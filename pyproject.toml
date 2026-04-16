@@ -1,0 +1,12 @@
+[project]
+name = "marimo-bias-variance-app"
+version = "0.1.0"
+description = "Single-file marimo app for teaching bias-variance tradeoff (aDAV lecture 3)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "altair>=6.0.0",
+    "marimo==0.23.0",
+    "numpy>=2.4.4",
+    "pandas>=3.0.2",
+]
