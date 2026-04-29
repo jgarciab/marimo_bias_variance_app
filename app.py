@@ -32,6 +32,8 @@ def theme():
     variance_color = "#5E7D50"
     split_a_color = "#C9791B"
     split_b_color = "#6C8BA4"
+    validation_winner_color = "#7B4EA3"
+    final_check_color = "#007C89"
     cv_color = chosen_color
 
     style = """
@@ -128,6 +130,7 @@ def theme():
         bias_color,
         chosen_color,
         cv_color,
+        final_check_color,
         mse_color,
         residual_color,
         split_a_color,
@@ -137,6 +140,7 @@ def theme():
         train_color,
         truth_color,
         valid_color,
+        validation_winner_color,
         variance_color,
     )
 
@@ -389,7 +393,7 @@ def bias_variance_helpers(
             "plot_predictions": np.clip(prediction_array, plot_domain[0], plot_domain[1]),
             "average": average,
             "bias_sq": float(np.mean((average - truth) ** 2)),
-            "variance": float(np.mean(np.var(prediction_array, axis=0))),
+            "variance": float(np.mean(np.var(prediction_array, axis=0, ddof=1))),
             "expected_mse": float(np.mean((prediction_array - truth[None, :]) ** 2) + noise_std**2),
             "noise_var": float(noise_std**2),
         }
@@ -402,32 +406,41 @@ def bias_variance_helpers(
         noise_std: float = 0.58,
         x_grid_points: int = 320,
     ) -> pd.DataFrame:
+        def run_bv(param_vals, n_resamples: int, n_train: int, fit_fn) -> pd.DataFrame:
+            rows: list[dict[str, float | int]] = []
+            for param_value in param_vals:
+                prediction_matrix = np.column_stack(
+                    [fit_fn(run_index, param_value, n_train) for run_index in range(n_resamples)]
+                )
+                rows.append(
+                    {
+                        "param": int(param_value),
+                        "bias2": float(np.mean((prediction_matrix.mean(axis=1) - truth) ** 2)),
+                        "variance": float(np.mean(np.var(prediction_matrix, axis=1, ddof=1))),
+                        "test_mse": float(np.mean((prediction_matrix - truth[:, None]) ** 2)),
+                    }
+                )
+            return pd.DataFrame(rows)
+
+        def fit_fn(run_index: int, degree: int, n_train: int) -> np.ndarray:
+            x_sample, y_sample = generate_points(
+                n_train,
+                noise_std=noise_std,
+                seed=seed + degree * 100_000 + 13 * run_index,
+            )
+            model = fit_polynomial(x_sample, y_sample, degree)
+            return predict_polynomial(model, x_grid)
+
         rows: list[dict[str, float | int | str]] = []
         x_grid = np.linspace(0.0, 1.0, x_grid_points)
         truth = true_function(x_grid)
-        population_x = np.linspace(0.0, 1.0, 800)
-        population_truth = true_function(population_x)
-        for degree in degree_grid:
-            population_model = fit_polynomial(population_x, population_truth, degree)
-            population_prediction = predict_polynomial(population_model, x_grid)
-            bias_sq = mse(truth, population_prediction)
-            predictions = []
-            for offset in range(n_resamples):
-                x_sample, y_sample = generate_points(
-                    sample_size,
-                    noise_std=noise_std,
-                    seed=seed + degree * 100 + 13 * offset,
-                )
-                model = fit_polynomial(x_sample, y_sample, degree)
-                predictions.append(predict_polynomial(model, x_grid))
-            prediction_array = np.asarray(predictions)
-            variance = float(np.mean(np.var(prediction_array, axis=0)))
-            expected_mse = float(bias_sq + variance + noise_std**2)
+        decomposition = run_bv(degree_grid, n_resamples, sample_size, fit_fn)
+        for component in decomposition.itertuples(index=False):
             rows.extend(
                 [
-                    {"Degree": degree, "Metric": "E[MSE]", "Value": expected_mse},
-                    {"Degree": degree, "Metric": "Bias²", "Value": bias_sq},
-                    {"Degree": degree, "Metric": "Variance", "Value": variance},
+                    {"Degree": component.param, "Metric": "E[MSE]", "Value": float(component.test_mse + noise_std**2)},
+                    {"Degree": component.param, "Metric": "Bias²", "Value": float(component.bias2)},
+                    {"Degree": component.param, "Metric": "Variance", "Value": float(component.variance)},
                 ]
             )
         return pd.DataFrame(rows)
@@ -532,7 +545,10 @@ def intro(mo, style):
                 "This app builds intuition about **generalization**: why training MSE is not enough, how overfitting appears, and why validation and cross-validation help us choose model complexity."
             ),
             mo.md(
-                "How to use it: move the sliders to change the polynomial model, press the `Recreate` buttons to draw fresh random data, and use the reveal switches only after making a prediction yourself. Each section is independent, so you can explore one idea without losing your place in the rest of the app."
+                "**Vocabulary.** We use **unseen-data MSE** for performance on data not used to fit the displayed model. We reserve **held-out test MSE** for the final one-time estimate after one model has been chosen."
+            ),
+            mo.md(
+                "How to use it: move the sliders to change the polynomial model, press the `Recreate` buttons to draw another random sample, and use the reveal switches only after making a prediction yourself. Each section is independent, so you can explore one idea without losing your place in the rest of the app."
             ),
         ],
         gap=0.30,
@@ -638,10 +654,10 @@ def s1_section(
                 "1. Measuring Fit with Training MSE",
                 "We want to understand the relationship between age and life satisfaction.",
                 (
-                    "Before we compare models, we need a metric that tells us how well a model fits observed data. In this section that metric is **mean squared error (MSE)**. \n"
+                    "Before we compare models, we need a metric for how far the predictions are from the observed outcomes. In this section that metric is **mean squared error (MSE)**. \n"
                     r"$\mathrm{MSE} = \frac{1}{n}\sum_{i=1}^{n}(y_i - \hat y_i)^2$"
                     "\n\n"
-                    "Use the polynomial-degree slider to change the fitted relationship between age and life satisfaction, and use `Recreate data` to draw a fresh sample from the same population."
+                    "Use the polynomial-degree slider to change the fitted relationship between age and life satisfaction, and use `Recreate data` to draw another sample from the same population."
                 ),
             ),
 
@@ -653,8 +669,8 @@ def s1_section(
             takeaway_md("Training MSE only tells you how well the model matches this sample. It does not yet answer the generalization question."),
             questions_md(
                 [
-                    "Why do large residuals matter more in MSE than small residuals?",
-                    "Why could a lower training MSE still be misleading for model choice?",
+                    "What is the difference between a residual and MSE?",
+                    "Why is lower training MSE not enough to choose a predictive model?",
                 ]
             ),
         ],
@@ -668,7 +684,7 @@ def s1_section(
 def s2_controls(counter_button, mo):
     s2_degree = mo.ui.slider(0, 10, value=8, step=1, label="Polynomial degree")
     s2_recreate = counter_button(label="Recreate data", kind="success")
-    s2_reveal_test = mo.ui.switch(value=False, label="Reveal test data")
+    s2_reveal_test = mo.ui.switch(value=False, label="Reveal unseen data")
     s2_show_train = mo.ui.switch(value=True, label="Show training points")
     return s2_degree, s2_recreate, s2_reveal_test, s2_show_train
 
@@ -756,7 +772,7 @@ def s2_section(
                 tooltip=[alt.Tooltip("Age:Q", format=".1f"), alt.Tooltip("Outcome:Q", format=".2f")],
             )
         )
-        _metrics.append(("Test MSE", f"{mse(_y_test, predict_polynomial(_model, _x_test)):.2f}"))
+        _metrics.append(("Unseen-data MSE", f"{mse(_y_test, predict_polynomial(_model, _x_test)):.2f}"))
 
     _chart = finish_chart(alt.layer(*_layers))
     _sidebar = sidebar(
@@ -766,20 +782,20 @@ def s2_section(
     _layout = mo.vstack(
         [
             section_md(
-                "2. From Training Data to Test (unseen) Data",
-                "To estimate generalization error, training data is not enough. We need unseen data (test data).",
+                "2. From Training Data to Unseen Data",
+                "To estimate generalization error, training data is not enough. We need unseen data.",
                 (
-                    "What we really care about is the **generalization error**: how well the model performs on new, unseen data. We estimate generalization error on new data, not on the same data used to fit the model.\n\n"
-                    "In practice, we often split observed data into training data and test data. The line below is fitted using the training data only. Then the test-data switch reveals fresh points from the same population without changing the fitted line."
+                    "**Unseen data** means data not used to fit the model we are evaluating. It can be a validation set, a held-out test set, or another sample from the same population.\n\n"
+                    "Here the line is fitted using the training data only. Then the switch reveals unseen points from the same population without changing the fitted line. The resulting **unseen-data MSE** is a first estimate of how well the model generalizes."
                 ),
             ),
             two_col(_sidebar, _chart),
-            note_md("The fitted line does not move when the test points appear. The new points are only for evaluation, not for fitting."),
-            takeaway_md("Training MSE answers how well the model fits the data it already saw. To estimate generalization error, we need new data."),
+            note_md("The fitted line does not move when the unseen points appear. The unseen points are only for evaluation, not for fitting."),
+            takeaway_md("Training MSE answers how well the model fits data it already saw. Unseen-data MSE asks whether that fit generalizes."),
             questions_md(
                 [
-                    "Before revealing the test data, which degrees do you expect to generalize best?",
-                    "After the unseen points appear, what signs suggest overfitting?",
+                    "What is unseen-data MSE, and how is it different from training MSE?",
+                    "Why should the fitted line stay fixed when unseen points are revealed?",
                 ]
             ),
         ],
@@ -791,7 +807,7 @@ def s2_section(
 
 @app.cell
 def s3_controls(counter_button, mo):
-    s3_degree = mo.ui.slider(0, 10, value=8, step=1, label="Highlighted degree")
+    s3_degree = mo.ui.slider(0, 10, value=8, step=1, label="Highlighted polynomial degree")
     s3_recreate = counter_button(label="Recreate data", kind="success")
     return s3_degree, s3_recreate
 
@@ -846,30 +862,35 @@ def s3_section(
 
     _new_rows = _curve_frame[_curve_frame["Dataset"] == "Unseen data"].reset_index(drop=True)
     _best_new_degree = int(_new_rows.loc[_new_rows["MSE"].idxmin(), "Degree"])
+    _highlight_rows = _curve_frame[_curve_frame["Degree"] == _highlight_degree]
+    _highlight_train_mse = float(_highlight_rows.loc[_highlight_rows["Dataset"] == "Training", "MSE"].iloc[0])
+    _highlight_test_mse = float(_highlight_rows.loc[_highlight_rows["Dataset"] == "Unseen data", "MSE"].iloc[0])
     _sidebar = sidebar(
         widgets=[s3_degree, s3_recreate],
         metrics=[
-            ("Highlighted degree", str(_highlight_degree)),
-            ("Best on new data", str(_best_new_degree)),
+            ("Flexibility", f"Degree {_highlight_degree}"),
+            ("Highlighted train MSE", f"{_highlight_train_mse:.2f}"),
+            ("Highlighted unseen-data MSE", f"{_highlight_test_mse:.2f}"),
+            ("Best unseen-data degree", str(_best_new_degree)),
         ],
     )
     _layout = mo.vstack(
         [
             section_md(
                 "3. Model Complexity: How Overfitting Shows Up",
-                "Training MSE rewards flexibility. MSE on new data reveals when that flexibility stops helping.",
+                "Here, flexibility means polynomial degree. Higher degree means a more flexible curve.",
                 (
-                    "This section compares training MSE with MSE on new, unseen data across polynomial degrees from 0 to 10. As the model gets more flexible, training MSE usually drops, but MSE on new data can start rising again.\n\n"
+                    "This section compares training MSE with **unseen-data MSE** across polynomial degrees from 0 to 10. As degree increases, the model has more freedom to bend toward the training sample. Training MSE usually drops, but unseen-data MSE can start rising again.\n\n"
                     "The y-axis is on a log scale so you can still see the full range, from tiny training errors for high-degree polynomials to the larger unseen-data errors that matter for model choice."
                 ),
             ),
             two_col(_sidebar, _chart),
             note_md("When the polynomial starts chasing the sample too closely, training error can keep improving even after generalization has started getting worse."),
-            takeaway_md("The classic U-shape belongs to MSE on new, unseen data, not to training MSE."),
+            takeaway_md("The classic U-shape belongs to unseen-data MSE, not to training MSE."),
             questions_md(
                 [
-                    "Why does the training curve usually keep falling as degree increases?",
-                    "Why does the test curve does not?",
+                    "In this section, what exactly does model flexibility mean?",
+                    "Why can training MSE improve while unseen-data MSE gets worse?",
                 ]
             ),
         ],
@@ -881,8 +902,8 @@ def s3_section(
 
 @app.cell
 def s4_controls(counter_button, mo):
-    s4_degree = mo.ui.slider(0, 5, value=3, step=1, label="Highlighted degree")
-    s4_runs = mo.ui.slider(4, 100, value=8, step=1, label="Number of fitted models")
+    s4_degree = mo.ui.slider(0, 5, value=3, step=1, label="Highlighted polynomial degree")
+    s4_runs = mo.ui.slider(4, 100, value=8, step=1, label="Models shown in top plot")
     s4_recreate = counter_button(label="Recreate data", kind="success")
     return s4_degree, s4_recreate, s4_runs
 
@@ -891,7 +912,7 @@ def s4_controls(counter_button, mo):
 def s4_reference_frame(evaluate_bias_variance_curves):
     s4_reference_frame = evaluate_bias_variance_curves(
         seed=930,
-        n_resamples=700,
+        n_resamples=1000,
         degree_grid=tuple(range(6)),
         sample_size=25,
         noise_std=0.58,
@@ -977,7 +998,11 @@ def s4_section(
         x="Age:Q",
         y="Value:Q",
     )
-    _left_chart = finish_chart(_fits + _truth + _average, width=320, height=250)
+    _left_chart = finish_chart(
+        (_fits + _truth + _average).properties(title="Repeated fits at the highlighted degree"),
+        width=560,
+        height=220,
+    )
 
     _color_scale = alt.Scale(
         domain=["E[MSE]", "Bias²", "Variance"],
@@ -989,25 +1014,27 @@ def s4_section(
         .encode(
             x=alt.X("Degree:Q", scale=alt.Scale(domain=[0, 5]), axis=alt.Axis(tickMinStep=1), title="Polynomial degree"),
             y=alt.Y("Display Value:Q", title="Error component", scale=alt.Scale(domain=[0.0, 3.0])),
-            color=alt.Color("Metric:N", scale=_color_scale),
+            color=alt.Color("Metric:N", scale=_color_scale, legend=alt.Legend(title="Component")),
             tooltip=[
                 alt.Tooltip("Degree:Q", format=".0f"),
                 alt.Tooltip("Metric:N"),
                 alt.Tooltip("Value:Q", format=".3f"),
             ],
         ),
-        width=360,
+        width=560,
         height=250,
     )
-    _plots = mo.hstack([_left_chart, _right_chart], widths=[0.95, 1.08], gap=0.24, wrap=True, align="start")
+    _right_chart = _right_chart.properties(title="Bias-variance decomposition from 1,000 fitted models per degree")
+    _plots = mo.vstack([_left_chart, _right_chart], gap=0.12)
 
     _mse_rows = _curve_frame[_curve_frame["Metric"] == "E[MSE]"].reset_index(drop=True)
     _best_degree = int(_mse_rows.loc[_mse_rows["Value"].idxmin(), "Degree"])
     _sidebar = sidebar(
         widgets=[s4_degree, s4_runs, s4_recreate],
         metrics=[
-            ("Highlighted degree", str(_degree)),
-            ("Models shown", str(int(s4_runs.value))),
+            ("Flexibility", f"Degree {_degree}"),
+            ("Top-plot models", str(int(s4_runs.value))),
+            ("Decomposition models", "1000 per degree"),
             ("Bias²", f"{float(_summary['bias_sq']):.3f}"),
             ("Variance", f"{float(_summary['variance']):.3f}"),
             ("E[MSE]", f"{float(_summary['expected_mse']):.3f}"),
@@ -1018,23 +1045,23 @@ def s4_section(
         [
             section_md(
                 "4. The Bias-Variance Trade-Off",
-                "Imagine fitting the same model class again and again on fresh random samples.",
+                "In this app, flexibility means polynomial degree.",
                 (
-                    "The left plot shows several fits of the same degree on different samples. The dashed black line is the true relationship, and the green line is the average prediction across fitted models.\n\n"
-                    "Bias is the error that comes from the model being systematically too simple or too rigid: on average, its predictions miss the true pattern. Variance is the error that comes from instability: if we collect a different sample, the fitted curve can move a lot.\n\n"
-                    "The right plot summarizes the long-run trade-off across degrees 0 to 5. Here bias² is computed from the best population polynomial of each degree, while variance is estimated from repeated noisy samples, so the decomposition reflects the theoretical model class rather than the small sample shown on the left."
+                    "First focus on **E[MSE]**: the prediction error we would expect after repeatedly drawing a training sample, fitting a degree-p polynomial, and evaluating it on unseen data.\n\n"
+                    "Then split that expected error into **bias** and **variance**. Bias is systematic error: if we averaged predictions over many possible training samples, how far would that average still be from the true relationship? Variance is instability: how much do predictions change from one training sample to another?\n\n"
+                    "The top plot shows several fits of the highlighted degree on different samples. The dashed black line is the true relationship, and the green line is the average prediction across fitted models. The bottom plot uses 1,000 fitted models for every degree from 0 to 5."
                 ),
             ),
             mo.md(r"$\mathbb{E}[\mathrm{MSE}] = \mathbb{E}\!\left[(Y - \hat f(X))^2\right] = \mathrm{Bias}^2 + \mathrm{Variance} + \sigma^2$"),
-            mo.md(r"$\mathrm{Bias}^2 = \mathbb{E}_X\!\left[(\mathbb{E}[\hat f(X)] - f(X))^2\right], \qquad \mathrm{Variance} = \mathbb{E}_X\!\left[\mathrm{Var}(\hat f(X))\right]$"),
-            mo.md("Bias asks: if we averaged over many possible training sets, how far would the model still be from the truth? Variance asks: how much would the fitted model change from one training set to another?"),
+            mo.md(r"$\mathrm{Bias}^2 = \mathbb{E}_X\!\left[(\mathbb{E}_{D}[\hat f_D(X)] - f(X))^2\right]$"),
+            mo.md(r"$\mathrm{Variance} = \mathbb{E}_X\!\left[\mathbb{E}_{D}\!\left[(\hat f_D(X) - \mathbb{E}_{D}[\hat f_D(X)])^2\right]\right]$"),
             two_col(_sidebar, _plots),
-            note_md("Low-degree models usually pay in bias. More flexible models usually pay in variance. The right-hand plot is restricted to degrees 0 to 5 and clipped at 3 so the trade-off stays readable."),
+            note_md("Low-degree models usually pay in bias. Higher-degree, more flexible models usually pay in variance. The decomposition plot is restricted to degrees 0 to 5 and clipped at 3 so the trade-off stays readable."),
             takeaway_md("Bias and variance pull in opposite directions, so the best model complexity is usually a compromise."),
             questions_md(
                 [
-                    "Which part of the curve is dominated more by bias, and which part is dominated more by variance?",
-                    "Why can the degree with the lowest MSE sit between the lowest-bias and lowest-variance degrees?",
+                    "How would you explain bias as systematic error and variance as instability?",
+                    "Why can the degree with the lowest E[MSE] be a compromise between bias and variance?",
                 ]
             ),
         ],
@@ -1112,19 +1139,19 @@ def s5_section(
                 "5. Picking Model Complexity with Validation Data",
                 "Now we compare ten candidate degrees using a 70:30 training-validation split inside the development sample.",
                 (
-                    "We often want to compare several models before evaluating the performance of the best one.\n\n"
-                    "Different degrees can tell very different stories: some underfit, some overfit, and some estimate generalization error much better than others. We need a principled way to choose among them.\n\n"
+                    "We often want to compare several models before estimating the performance of the final chosen model.\n\n"
+                    "Different degrees can tell very different stories: some underfit, some overfit, and some have much lower unseen-data MSE than others. We need a principled way to choose among them.\n\n"
                     "Here, `N` is the size of the development sample available for model selection. That development sample is split 70:30 into training and validation.\n\n"
-                    "The validation curve is the unseen-data proxy used for choosing among the ten candidate degrees. The test set still stays out of sight."
+                    "The validation curve is an **unseen-data MSE** curve used for choosing among the ten candidate degrees. It is not the final held-out test MSE. The held-out test set stays out of sight until one model has been chosen."
                 ),
             ),
             two_col(_sidebar, _chart),
-            note_md("Validation is for choosing among models. It is already giving you unseen-data feedback, so the test set does not need to appear yet."),
-            takeaway_md("Validation helps you choose model complexity without spending the test set too early."),
+            note_md("Validation data are unseen by the fitted model, but they are still used during model selection. That is why validation MSE and held-out test MSE have different jobs."),
+            takeaway_md("Validation helps you choose model complexity without spending the held-out test set too early."),
             questions_md(
                 [
-                    "Why is the validation curve more useful for model choice than the training curve?",
-                    "How does changing N affect how noisy the validation decision feels?",
+                    "Why is validation MSE an unseen-data MSE used for model choice?",
+                    "If you recreate the development sample, how stable is the validation-chosen degree?",
                 ]
             ),
         ],
@@ -1139,7 +1166,7 @@ def s6_controls(counter_button, mo):
     s6_degree = mo.ui.slider(0, 10, value=8, step=1, label="Degree chosen for final check")
     s6_n = mo.ui.slider(40, 220, value=80, step=10, label="Development sample size N")
     s6_recreate = counter_button(label="Recreate data", kind="success")
-    s6_reveal = mo.ui.switch(value=False, label="Reveal test error")
+    s6_reveal = mo.ui.switch(value=False, label="Reveal held-out test error")
     return s6_degree, s6_n, s6_recreate, s6_reveal
 
 
@@ -1149,6 +1176,7 @@ def s6_section(
     build_selection_data,
     degrees,
     evaluate_validation_curves,
+    final_check_color,
     finish_chart,
     fit_polynomial,
     mo,
@@ -1164,11 +1192,11 @@ def s6_section(
     s6_reveal,
     section_md,
     sidebar,
-    split_indices,
     takeaway_md,
     train_color,
     two_col,
     valid_color,
+    validation_winner_color,
 ):
     _seed = 510 + int(s6_recreate.value or 0)
     _n = int(s6_n.value)
@@ -1183,10 +1211,14 @@ def s6_section(
     )
     _plot_frame = _frame.copy()
     _plot_frame["Display MSE"] = np.minimum(_plot_frame["MSE"], 1.2)
-    _chart = alt.Chart(_plot_frame).mark_line(point=True, strokeWidth=2.6).encode(
+    _mse_chart = alt.Chart(_plot_frame).mark_line(point=True, strokeWidth=2.6).encode(
         x=alt.X("Degree:Q", scale=alt.Scale(domain=[0, 10]), axis=alt.Axis(tickMinStep=1), title="Polynomial degree"),
         y=alt.Y("Display MSE:Q", title="MSE", scale=alt.Scale(domain=[0.0, 1.2])),
-        color=alt.Color("Dataset:N", scale=alt.Scale(domain=["Training", "Validation"], range=[train_color, valid_color])),
+        color=alt.Color(
+            "Dataset:N",
+            scale=alt.Scale(domain=["Training", "Validation"], range=[train_color, valid_color]),
+            legend=alt.Legend(title="MSE curve"),
+        ),
         tooltip=[alt.Tooltip("Degree:Q", format=".0f"), alt.Tooltip("Dataset:N"), alt.Tooltip("MSE:Q", format=".2f")],
     )
     _rules = pd.DataFrame(
@@ -1199,10 +1231,14 @@ def s6_section(
         x="Degree:Q",
         color=alt.Color(
             "Label:N",
-            scale=alt.Scale(domain=["Validation winner", "Chosen for final check"], range=[valid_color, "#B23A48"]),
+            scale=alt.Scale(
+                domain=["Validation winner", "Chosen for final check"],
+                range=[validation_winner_color, final_check_color],
+            ),
+            legend=alt.Legend(title="Reference line"),
         ),
     )
-    _chart = finish_chart(_chart + _rules_chart, height=250)
+    _chart = finish_chart(alt.layer(_mse_chart, _rules_chart).resolve_scale(color="independent"), height=250)
 
     _metrics = [
         ("Validation chose", f"Degree {int(_summary['chosen_degree'])}"),
@@ -1211,9 +1247,8 @@ def s6_section(
         ("Held-out test size", str(len(_x_test))),
     ]
     if bool(s6_reveal.value):
-        _train_idx, _, _ = split_indices(len(_x_dev), train_frac=0.70, valid_frac=0.30, seed=_seed + 9)
-        _model = fit_polynomial(_x_dev[_train_idx], _y_dev[_train_idx], _chosen_degree)
-        _metrics.append(("Test MSE", f"{mse(_y_test, predict_polynomial(_model, _x_test)):.2f}"))
+        _model = fit_polynomial(_x_dev, _y_dev, _chosen_degree)
+        _metrics.append(("Held-out test MSE", f"{mse(_y_test, predict_polynomial(_model, _x_test)):.2f}"))
 
     _sidebar = sidebar(
         widgets=[s6_degree, s6_n, s6_recreate, s6_reveal],
@@ -1222,20 +1257,20 @@ def s6_section(
     _layout = mo.vstack(
         [
             section_md(
-                "6. Test Data for the Final Audit",
-                "Only one chosen model should touch the test set.",
+                "6. Held-Out Test Data for the Final Audit",
+                "Only one chosen model should touch the held-out test set.",
                 (
-                    "Section 5 used unseen data to compare models. Once unseen data are used for comparison, they are no longer a clean final test.\n\n"
-                    "The repair is a three-way split: training for fitting, validation for comparing models, and test for one final audit. Pick one degree for the final check, then reveal its test error."
+                    "Section 5 used validation data to compare models. Validation data are unseen by each fitted model, but they are not a clean final audit because they influenced the choice of degree.\n\n"
+                    "The repair is a three-way split: training for fitting, validation for comparing models, and a **held-out test set** for one final audit. Pick one degree for the final check, retrain that one model on the full development sample, then reveal its held-out test MSE once."
                 ),
             ),
             two_col(_sidebar, _chart),
-            note_md("The test set is for auditing a chosen model, not for comparing all ten models side by side."),
-            takeaway_md("If we keep peeking at test performance while tuning, we start overfitting the model-selection process too."),
+            note_md("The held-out test set is for auditing one chosen model, not for comparing all ten degrees side by side."),
+            takeaway_md("If we keep peeking at held-out test performance while tuning, we start overfitting the model-selection process too."),
             questions_md(
                 [
-                    "Why should only one chosen model go to the test set?",
-                    "What is the difference between using validation and using test data?",
+                    "Why is the held-out test set used only after the degree has been chosen?",
+                    "What would go wrong if we used held-out test MSE to choose among degrees?",
                 ]
             ),
         ],
@@ -1345,12 +1380,91 @@ def s7_section(
             takeaway_md("When one split feels noisy, the next step is usually to average more information rather than to over-trust one partition."),
             questions_md(
                 [
-                    "What changed here besides the split itself?",
-                    "What would you do next if two validation splits disagree?",
+                    "What changes between validation split A and validation split B?",
+                    "Why is split disagreement a reason to average across splits with CV?",
                 ]
             ),
         ],
         gap=0.30,
+    )
+    _layout
+    return
+
+
+@app.cell
+def s8_cv_visual_intro(alt, cv_color, finish_chart, mo, pd, section_md):
+    _fold_order = [f"Fold {fold_index}" for fold_index in range(1, 6)]
+    _round_order = [f"Round {round_index}" for round_index in range(1, 6)]
+    _model_a_mse = [0.48, 0.42, 0.51, 0.45, 0.47]
+    _model_b_mse = [0.44, 0.46, 0.43, 0.49, 0.41]
+    _fold_frame = pd.DataFrame(
+        [
+            {
+                "CV round": f"Round {round_index}",
+                "Fold": f"Fold {fold_index}",
+                "Role": "Validation fold" if fold_index == round_index else "Training folds",
+                "Model A label": f"A MSE {model_a_mse:.2f}" if fold_index == round_index else "",
+                "Model B label": f"B MSE {model_b_mse:.2f}" if fold_index == round_index else "",
+            }
+            for round_index, (model_a_mse, model_b_mse) in enumerate(zip(_model_a_mse, _model_b_mse), start=1)
+            for fold_index in range(1, 6)
+        ]
+    )
+    _validation_frame = _fold_frame[_fold_frame["Role"] == "Validation fold"].copy()
+    _base = alt.Chart(_fold_frame).mark_rect(stroke="#FFFFFF", strokeWidth=1.4).encode(
+        x=alt.X("Fold:N", sort=_fold_order, title="Data block"),
+        y=alt.Y("CV round:N", sort=_round_order, title="CV round"),
+        color=alt.Color(
+            "Role:N",
+            scale=alt.Scale(domain=["Training folds", "Validation fold"], range=["#D9E1E7", cv_color]),
+            legend=alt.Legend(title="Role"),
+        ),
+        tooltip=["CV round:N", "Fold:N", "Role:N"],
+    )
+    _model_a_labels = alt.Chart(_validation_frame).mark_text(
+        dy=-8,
+        fontSize=12,
+        fontWeight="bold",
+        color="#143D2A",
+    ).encode(
+        x=alt.X("Fold:N", sort=_fold_order),
+        y=alt.Y("CV round:N", sort=_round_order),
+        text="Model A label:N",
+    )
+    _model_b_labels = alt.Chart(_validation_frame).mark_text(
+        dy=8,
+        fontSize=12,
+        fontWeight="bold",
+        color="#143D2A",
+    ).encode(
+        x=alt.X("Fold:N", sort=_fold_order),
+        y=alt.Y("CV round:N", sort=_round_order),
+        text="Model B label:N",
+    )
+    _cv_visual = finish_chart(
+        (_base + _model_a_labels + _model_b_labels).properties(
+            title="How 5-fold cross-validation averages validation MSE"
+        ),
+        width=560,
+        height=175,
+    )
+    _mean_a = sum(_model_a_mse) / len(_model_a_mse)
+    _mean_b = sum(_model_b_mse) / len(_model_b_mse)
+    _layout = mo.vstack(
+        [
+            section_md(
+                "8. Cross-Validation: Averaging Validation Folds",
+                "Each green cell is the validation fold for that round.",
+                (
+                    "The numbers inside the green cells are hypothetical validation MSEs for two candidate models, A and B. We do **not** choose the model from one green cell. We average each candidate's validation MSE across the folds, then choose the model with the lower average validation MSE."
+                ),
+            ),
+            _cv_visual,
+            mo.md(
+                f"Example averages: Model A = `{_mean_a:.2f}`, Model B = `{_mean_b:.2f}`. The average, not any single fold, is the CV estimate used for model comparison."
+            ),
+        ],
+        gap=0.24,
     )
     _layout
     return
@@ -1435,6 +1549,7 @@ def s8_section(
                 domain=["Validation split A", "Validation split B", "5-fold CV"],
                 range=[split_a_color, split_b_color, cv_color],
             ),
+            legend=alt.Legend(title="Selection method"),
         ),
         tooltip=[alt.Tooltip("Degree:Q", format=".0f"), alt.Tooltip("Curve:N"), alt.Tooltip("MSE:Q", format=".2f")],
     )
@@ -1446,7 +1561,7 @@ def s8_section(
                 domain=["Validation split A", "Validation split B", "5-fold CV"],
                 range=[split_a_color, split_b_color, cv_color],
             ),
-            legend=None,
+            legend=alt.Legend(title="Selection method"),
         ),
     )
     _chart = finish_chart(_chart + _rules_chart, height=250)
@@ -1456,26 +1571,26 @@ def s8_section(
             ("Split A chose", f"Degree {int(_summary_a['chosen_degree'])}"),
             ("Split B chose", f"Degree {int(_summary_b['chosen_degree'])}"),
             ("5-fold CV chose", f"Degree {_cv_degree}"),
-            ("Outer test after CV", f"{_final_test_mse:.2f}"),
+            ("Held-out test MSE after CV", f"{_final_test_mse:.2f}"),
         ],
     )
     _layout = mo.vstack(
         [
             section_md(
-                "8. Cross-Validation for Stability",
-                "Cross-validation uses the same development sample more efficiently than one fixed 70:30 split.",
+                "Cross-Validation for Stability",
+                "Now compare one-split validation choices with the 5-fold CV choice.",
                 (
-                    "Cross-validation is the remedy for instability in model comparison. Instead of betting everything on one validation split, we average validation performance across several folds and then choose the degree with the lowest average error.\n\n"
-                    "Cross-validation is not a replacement for the final test set. After choosing the degree, we retrain on all development data and use the test set once for a final check."
+                    "Cross-validation is the remedy for instability in model comparison. Instead of letting one validation split carry the whole decision, we average validation MSE across folds and then choose the degree with the lowest average error.\n\n"
+                    "Cross-validation is not a replacement for the held-out test set. After choosing the degree, we retrain on all development data and use the held-out test set once for a final check."
                 ),
             ),
             two_col(_sidebar, _chart),
             note_md("Cross-validation does not make noise disappear, but it usually reduces the chance that one arbitrary split dominates the complexity decision."),
-            takeaway_md("Use validation or cross-validation to choose complexity, retrain on all development data, and save the test set for one final check."),
+            takeaway_md("Use validation or cross-validation to choose complexity, retrain on all development data, and save the held-out test set for one final check."),
             questions_md(
                 [
-                    "Why is cross-validation usually less sensitive than one validation split?",
-                    "After choosing the degree with CV, why do we still keep a test set?",
+                    "Why do we compare models using average validation MSE across folds?",
+                    "After CV chooses the degree, what role is left for the held-out test MSE?",
                 ]
             ),
         ],
