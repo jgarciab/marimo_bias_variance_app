@@ -353,7 +353,6 @@ def selection_helpers(
 def bias_variance_helpers(
     fit_polynomial,
     generate_points,
-    mse,
     np,
     pd,
     plot_domain,
@@ -1050,7 +1049,7 @@ def s4_section(
             takeaway_md("Bias and variance pull in opposite directions, so the best model complexity is usually a compromise."),
             questions_md(
                 [
-                    "How would you explain bias as systematic error and variance as instability?",
+                    "How does model complexity impact the trade-off between bias an variance)?",
                     "Why can the degree with the lowest E[MSE] be a compromise between bias and variance?",
                 ]
             ),
@@ -1063,7 +1062,7 @@ def s4_section(
 
 @app.cell
 def s5_controls(counter_button, mo):
-    s5_n = mo.ui.slider(10, 220, value=10, step=10, label="Development sample size N")
+    s5_n = mo.ui.slider(10, 220, value=20, step=10, label="Development sample size N")
     s5_recreate = counter_button(label="Recreate data", kind="success")
     return s5_n, s5_recreate
 
@@ -1136,7 +1135,7 @@ def s5_section(
                 ),
             ),
             two_col(_sidebar, _chart),
-            note_md("Validation data are unseen by the fitted model, but they are still used during model selection. That is why validation MSE and held-out test MSE have different jobs."),
+            note_md("Validation data are unseen by the fitted model, but they are still used during model selection."),
             takeaway_md("Validation helps you choose model complexity without spending the held-out test set too early."),
             questions_md(
                 [
@@ -1578,8 +1577,7 @@ def s7_section(
             takeaway_md("When one split feels noisy, the next step is usually to average more information rather than to over-trust one partition."),
             questions_md(
                 [
-                    "What changes between validation split A and validation split B?",
-                    "Why is split disagreement a reason to average across splits with CV?",
+                    "What does the model with lowest MSE differs between splits?",
                 ]
             ),
         ],
@@ -1590,7 +1588,15 @@ def s7_section(
 
 
 @app.cell
-def s8_cv_visual_intro(alt, cv_color, finish_chart, holdout_color, mo, pd, section_md):
+def s8_cv_visual_intro(
+    alt,
+    cv_color,
+    finish_chart,
+    holdout_color,
+    mo,
+    pd,
+    section_md,
+):
     _fold_order = [f"Fold {fold_index}" for fold_index in range(1, 6)] + ["Held-out test"]
     _round_order = [f"Round {round_index}" for round_index in range(1, 6)]
     _model_a_mse = [0.48, 0.42, 0.51, 0.45, 0.47]
