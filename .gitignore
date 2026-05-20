@@ -13,4 +13,5 @@ wheels/
 .venv*/
 
 # Local exports / notebooks
+docs/
 wasm_export/
