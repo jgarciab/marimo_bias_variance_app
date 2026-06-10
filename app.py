@@ -1062,111 +1062,22 @@ def s4_section(
 
 @app.cell
 def s5_controls(counter_button, mo):
+    s5_degree = mo.ui.slider(0, 10, value=4, step=1, label="Degree chosen for final audit")
     s5_n = mo.ui.slider(10, 220, value=20, step=10, label="Development sample size N")
     s5_recreate = counter_button(label="Recreate data", kind="success")
-    return s5_n, s5_recreate
+    s5_reveal = mo.ui.switch(value=False, label="Reveal held-out test error")
+    return s5_degree, s5_n, s5_recreate, s5_reveal
 
 
 @app.cell
 def s5_section(
     alt,
     build_selection_data,
-    chosen_color,
-    evaluate_validation_curves,
-    finish_chart,
-    mo,
-    note_md,
-    np,
-    pd,
-    questions_md,
-    s5_n,
-    s5_recreate,
-    section_md,
-    selection_degrees,
-    sidebar,
-    takeaway_md,
-    train_color,
-    two_col,
-    valid_color,
-):
-    _seed = 410 + int(s5_recreate.value or 0)
-    _n = int(s5_n.value)
-    _x_dev, _y_dev, _, _ = build_selection_data(seed=_seed, development_n=_n)
-    _frame, _summary = evaluate_validation_curves(
-        x_dev=_x_dev,
-        y_dev=_y_dev,
-        degree_grid=selection_degrees,
-        split_seed=_seed + 5,
-        train_frac=0.50,
-    )
-    _plot_frame = _frame.copy()
-    _plot_frame["Display MSE"] = np.maximum(_plot_frame["MSE"], 1e-3)
-    _color_scale = alt.Scale(domain=["Training", "Validation"], range=[train_color, valid_color])
-    _chart = alt.Chart(_plot_frame).mark_line(point=True, strokeWidth=2.6).encode(
-        x=alt.X("Degree:Q", scale=alt.Scale(domain=[0, 10]), axis=alt.Axis(tickMinStep=1), title="Polynomial degree"),
-        y=alt.Y("Display MSE:Q", title="MSE (log scale)", scale=alt.Scale(type="log")),
-        color=alt.Color("Dataset:N", scale=_color_scale),
-        tooltip=[alt.Tooltip("Degree:Q", format=".0f"), alt.Tooltip("Dataset:N"), alt.Tooltip("MSE:Q", format=".2f")],
-    )
-    _rule = alt.Chart(pd.DataFrame({"Degree": [_summary["chosen_degree"]]})).mark_rule(
-        color=chosen_color,
-        strokeDash=[7, 4],
-        strokeWidth=2.0,
-    ).encode(x="Degree:Q")
-    _chart = finish_chart(_chart + _rule, height=250)
-
-    _sidebar = sidebar(
-        widgets=[s5_n, s5_recreate],
-        metrics=[
-            ("Validation chose", f"Degree {int(_summary['chosen_degree'])}"),
-            ("Training / validation", f"{int(_summary['train_count'])} / {int(_summary['validation_count'])}"),
-        ],
-    )
-    _layout = mo.vstack(
-        [
-            section_md(
-                "5. Picking Model Complexity with Validation Data",
-                "Now we compare eleven candidate degrees using a 50:50 training-validation split inside the development sample.",
-                (
-                    "We often want to compare several models before estimating the performance of the final chosen model.\n\n"
-                    "Different degrees can tell very different stories: some underfit, some overfit, and some have much lower unseen-data MSE than others. We need a principled way to choose among them.\n\n"
-                    "Here, `N` is the size of the development sample available for model selection. That development sample is split 50:50 into training and validation.\n\n"
-                    "The validation curve is an **unseen-data MSE** curve used for choosing among degrees 0 through 10. It is not the final held-out test MSE. The held-out test set stays out of sight until one model has been chosen."
-                ),
-            ),
-            two_col(_sidebar, _chart),
-            note_md("Validation data are unseen by the fitted model, but they are still used during model selection."),
-            takeaway_md("Validation helps you choose model complexity without spending the held-out test set too early."),
-            questions_md(
-                [
-                    "Why is validation MSE an unseen-data MSE used for model choice?",
-                    "If you recreate the development sample, how stable is the validation-chosen degree?",
-                ]
-            ),
-        ],
-        gap=0.30,
-    )
-    _layout
-    return
-
-
-@app.cell
-def s6_controls(counter_button, mo):
-    s6_degree = mo.ui.slider(0, 10, value=8, step=1, label="Degree chosen for final check")
-    s6_n = mo.ui.slider(10, 220, value=10, step=10, label="Development sample size N")
-    s6_recreate = counter_button(label="Recreate data", kind="success")
-    s6_reveal = mo.ui.switch(value=False, label="Reveal held-out test error")
-    return s6_degree, s6_n, s6_recreate, s6_reveal
-
-
-@app.cell
-def s6_section(
-    alt,
-    build_selection_data,
     evaluate_validation_curves,
     final_check_color,
     finish_chart,
     fit_polynomial,
+    holdout_color,
     mo,
     mse,
     note_md,
@@ -1174,10 +1085,10 @@ def s6_section(
     pd,
     predict_polynomial,
     questions_md,
-    s6_degree,
-    s6_n,
-    s6_recreate,
-    s6_reveal,
+    s5_degree,
+    s5_n,
+    s5_recreate,
+    s5_reveal,
     section_md,
     selection_degrees,
     sidebar,
@@ -1187,41 +1098,103 @@ def s6_section(
     valid_color,
     validation_winner_color,
 ):
-    _seed = 510 + int(s6_recreate.value or 0)
-    _n = int(s6_n.value)
-    _chosen_degree = int(s6_degree.value)
+    _seed = 410 + int(s5_recreate.value or 0)
+    _n = int(s5_n.value)
+    _chosen_degree = int(s5_degree.value)
     _x_dev, _y_dev, _x_test, _y_test = build_selection_data(seed=_seed, development_n=_n)
     _frame, _summary = evaluate_validation_curves(
         x_dev=_x_dev,
         y_dev=_y_dev,
         degree_grid=selection_degrees,
-        split_seed=_seed + 9,
+        split_seed=_seed + 5,
         train_frac=0.50,
     )
+    _train_count = int(_summary["train_count"])
+    _valid_count = int(_summary["validation_count"])
+    _test_count = int(len(_x_test))
+
+    _split_frame = pd.DataFrame(
+        [
+            {
+                "Role": "Training",
+                "Start": 0,
+                "End": _train_count,
+                "Count": _train_count,
+                "Label": f"Fit models\nn={_train_count}",
+            },
+            {
+                "Role": "Validation",
+                "Start": _train_count,
+                "End": _train_count + _valid_count,
+                "Count": _valid_count,
+                "Label": f"Choose degree\nn={_valid_count}",
+            },
+            {
+                "Role": "Held-out test",
+                "Start": _train_count + _valid_count,
+                "End": _train_count + _valid_count + _test_count,
+                "Count": _test_count,
+                "Label": f"Final audit\nn={_test_count}",
+            },
+        ]
+    )
+    _split_scale = alt.Scale(
+        domain=["Training", "Validation", "Held-out test"],
+        range=[train_color, valid_color, holdout_color],
+    )
+    _split_bar = alt.Chart(_split_frame).mark_bar(
+        cornerRadius=5,
+    ).encode(
+        x=alt.X("Start:Q", axis=None, title=None),
+        x2="End:Q",
+        y=alt.value(36),
+        color=alt.Color("Role:N", scale=_split_scale, legend=alt.Legend(title="Role")),
+        tooltip=[
+            alt.Tooltip("Role:N"),
+            alt.Tooltip("Count:Q", format=".0f", title="Observations"),
+        ],
+    )
+    _split_labels = alt.Chart(_split_frame).mark_text(
+        align="center",
+        baseline="middle",
+        color="white",
+        fontSize=13,
+        fontWeight="bold",
+        lineBreak="\n",
+    ).encode(
+        x=alt.X("mid:Q", axis=None),
+        y=alt.value(36),
+        text="Label:N",
+    ).transform_calculate(mid="(datum.Start + datum.End) / 2")
+    _split_diagram = finish_chart(
+        (_split_bar + _split_labels).properties(
+            title="One workflow: train to fit, validate to choose, test once to audit"
+        ),
+        width=650,
+        height=90,
+    )
+
     _plot_frame = _frame.copy()
     _plot_frame["Display MSE"] = np.maximum(_plot_frame["MSE"], 1e-3)
+    _color_scale = alt.Scale(domain=["Training", "Validation"], range=[train_color, valid_color])
     _mse_chart = alt.Chart(_plot_frame).mark_line(point=True, strokeWidth=2.6).encode(
         x=alt.X("Degree:Q", scale=alt.Scale(domain=[0, 10]), axis=alt.Axis(tickMinStep=1), title="Polynomial degree"),
         y=alt.Y("Display MSE:Q", title="MSE (log scale)", scale=alt.Scale(type="log")),
-        color=alt.Color(
-            "Dataset:N",
-            scale=alt.Scale(domain=["Training", "Validation"], range=[train_color, valid_color]),
-            legend=alt.Legend(title="MSE curve"),
-        ),
+        color=alt.Color("Dataset:N", scale=_color_scale),
         tooltip=[alt.Tooltip("Degree:Q", format=".0f"), alt.Tooltip("Dataset:N"), alt.Tooltip("MSE:Q", format=".2f")],
     )
     _rules = pd.DataFrame(
         {
             "Degree": [int(_summary["chosen_degree"]), _chosen_degree],
-            "Label": ["Validation winner", "Chosen for final check"],
+            "Label": ["Validation winner", "Chosen for final audit"],
         }
     )
-    _rules_chart = alt.Chart(_rules).mark_rule(strokeWidth=1.8, strokeDash=[7, 4]).encode(
+    _rules_chart = alt.Chart(_rules).mark_rule(strokeDash=[7, 4], strokeWidth=1.8).encode(
         x="Degree:Q",
         color=alt.Color(
             "Label:N",
             scale=alt.Scale(
-                domain=["Validation winner", "Chosen for final check"],
+                domain=["Validation winner", "Chosen for final audit"],
                 range=[validation_winner_color, final_check_color],
             ),
             legend=alt.Legend(title="Reference line"),
@@ -1237,36 +1210,39 @@ def s6_section(
     )
     _metrics = [
         ("Validation chose", f"Degree {int(_summary['chosen_degree'])}"),
-        ("Chosen for final check", f"Degree {_chosen_degree}"),
-        ("Chosen degree validation MSE", f"{_chosen_validation_mse:.2f}"),
-        ("Training / validation", f"{int(_summary['train_count'])} / {int(_summary['validation_count'])}"),
-        ("Held-out test size", str(len(_x_test))),
+        ("Chosen for audit", f"Degree {_chosen_degree}"),
+        ("Chosen validation MSE", f"{_chosen_validation_mse:.2f}"),
+        ("Training / validation", f"{_train_count} / {_valid_count}"),
+        ("Held-out test size", str(_test_count)),
     ]
-    if bool(s6_reveal.value):
+    if bool(s5_reveal.value):
         _model = fit_polynomial(_x_dev, _y_dev, _chosen_degree)
-        _metrics.append(("Held-out test MSE", f"{mse(_y_test, predict_polynomial(_model, _x_test)):.2f}"))
+        _test_mse = mse(_y_test, predict_polynomial(_model, _x_test))
+        _metrics.append(("Held-out test MSE", f"{_test_mse:.2f}"))
 
     _sidebar = sidebar(
-        widgets=[s6_degree, s6_n, s6_recreate, s6_reveal],
+        widgets=[s5_degree, s5_n, s5_recreate, s5_reveal],
         metrics=_metrics,
     )
     _layout = mo.vstack(
         [
             section_md(
-                "6. Held-Out Test Data for the Final Audit",
-                "Only one chosen model should touch the held-out test set.",
+                "5. Train, Validate, Then Test Once",
+                "Use validation to choose model complexity, then reserve the held-out test set for one final audit.",
                 (
-                    "Section 5 used validation data to compare models. Validation data are unseen by each fitted model, but they are not a clean final audit because they influenced the choice of degree.\n\n"
-                    "The repair is a three-way split: training for fitting, validation for comparing degrees 0 through 10, and a **held-out test set** for one final audit. Pick one degree for the final check, retrain that one model on the full development sample, then reveal its held-out test MSE once."
+                    "We often compare several candidate models before estimating the performance of the final chosen model. The split diagram keeps the jobs separate: training data fit each candidate, validation data choose among degrees 0 through 10, and the held-out test set waits until one degree has been selected.\n\n"
+                    "Here, `N` is the development sample size. It is split 50:50 into training and validation. The test sample is generated separately and stays out of sight until you flip the reveal switch.\n\n"
+                    "Try first using the degree selected by validation, then deliberately choose a nearby or more flexible degree. The validation MSE can guide the choice, but the held-out test MSE is the final audit of the one model you actually chose."
                 ),
             ),
+            _split_diagram,
             two_col(_sidebar, _chart),
-            note_md("The held-out test set is for auditing one chosen model, not for comparing all candidate degrees side by side."),
-            takeaway_md("If we keep peeking at held-out test performance while tuning, we start overfitting the model-selection process too."),
+            note_md("Validation data are unseen by each fitted model, but they still influence model selection. That is why validation MSE is not the final generalization estimate."),
+            takeaway_md("Choose complexity with validation, retrain the chosen degree on all development data, and use the held-out test set once."),
             questions_md(
                 [
-                    "Why is the held-out test set used only after the degree has been chosen?",
-                    "What would go wrong if we used held-out test MSE to choose among degrees?",
+                    "Why do training, validation, and held-out test data have different jobs?",
+                    "What would go wrong if you used held-out test MSE to choose among degrees?",
                 ]
             ),
         ],
@@ -1454,7 +1430,7 @@ def s6b_section(
     _layout = mo.vstack(
         [
             section_md(
-                "7. Why Validation MSE Is Not the Final Generalization Estimate",
+                "6. Why Validation MSE Is Not the Final Generalization Estimate",
                 "After we use validation data to choose a model, the chosen validation MSE is usually too optimistic.",
                 (
                     "Here the data are pure noise: `y ~ N(0, 1)`. The two candidate models, `y = 1` and `y = -1`, are equally bad in expectation. With a small validation sample, one model often wins just by luck.\n\n"
@@ -1501,83 +1477,60 @@ def s7_section(
     selection_degrees,
     sidebar,
     split_a_color,
-    split_b_color,
     takeaway_md,
     two_col,
+    valid_color,
 ):
     _seed = 610 + int(s7_recreate.value or 0)
     _n = int(s7_n.value)
     _x_dev, _y_dev, _, _ = build_selection_data(seed=_seed, development_n=_n)
-    _split_a, _summary_a = evaluate_validation_curves(
+    _split, _summary = evaluate_validation_curves(
         x_dev=_x_dev,
         y_dev=_y_dev,
         degree_grid=selection_degrees,
         split_seed=_seed + 9,
         train_frac=0.50,
     )
-    _split_b, _summary_b = evaluate_validation_curves(
-        x_dev=_x_dev,
-        y_dev=_y_dev,
-        degree_grid=selection_degrees,
-        split_seed=_seed + 41,
-        train_frac=0.50,
-    )
-    _plot_frame = pd.concat(
-        [
-            _split_a[_split_a["Dataset"] == "Validation"].assign(Split="Validation split A"),
-            _split_b[_split_b["Dataset"] == "Validation"].assign(Split="Validation split B"),
-        ],
-        ignore_index=True,
-    )
+    _plot_frame = _split[_split["Dataset"] == "Validation"].copy()
+    _plot_frame["Curve"] = "One validation split"
     _plot_frame["Display MSE"] = np.maximum(_plot_frame["MSE"], 1e-3)
-    _rules = pd.DataFrame(
-        {
-            "Degree": [int(_summary_a["chosen_degree"]), int(_summary_b["chosen_degree"])],
-            "Split": ["Validation split A", "Validation split B"],
-        }
-    )
-    _chart = alt.Chart(_plot_frame).mark_line(point=True, strokeWidth=2.6).encode(
+    _rules = pd.DataFrame({"Degree": [int(_summary["chosen_degree"])]})
+    _chart = alt.Chart(_plot_frame).mark_line(point=True, strokeWidth=2.6, color=valid_color).encode(
         x=alt.X("Degree:Q", scale=alt.Scale(domain=[0, 10]), axis=alt.Axis(tickMinStep=1), title="Polynomial degree"),
         y=alt.Y("Display MSE:Q", title="Validation MSE (log scale)", scale=alt.Scale(type="log")),
-        color=alt.Color(
-            "Split:N",
-            scale=alt.Scale(domain=["Validation split A", "Validation split B"], range=[split_a_color, split_b_color]),
-        ),
-        tooltip=[alt.Tooltip("Degree:Q", format=".0f"), alt.Tooltip("Split:N"), alt.Tooltip("MSE:Q", format=".2f")],
+        tooltip=[alt.Tooltip("Degree:Q", format=".0f"), alt.Tooltip("MSE:Q", format=".2f")],
     )
-    _rules_chart = alt.Chart(_rules).mark_rule(strokeDash=[7, 4], strokeWidth=1.8).encode(
-        x="Degree:Q",
-        color=alt.Color(
-            "Split:N",
-            scale=alt.Scale(domain=["Validation split A", "Validation split B"], range=[split_a_color, split_b_color]),
-            legend=None,
-        ),
-    )
+    _rules_chart = alt.Chart(_rules).mark_rule(
+        color=split_a_color,
+        strokeDash=[7, 4],
+        strokeWidth=1.8,
+    ).encode(x="Degree:Q")
     _chart = finish_chart(_chart + _rules_chart, height=250)
     _sidebar = sidebar(
         widgets=[s7_n, s7_recreate],
         metrics=[
-            ("Split A chose", f"Degree {int(_summary_a['chosen_degree'])}"),
-            ("Split B chose", f"Degree {int(_summary_b['chosen_degree'])}"),
-            ("Training / validation", f"{int(_summary_a['train_count'])} / {int(_summary_a['validation_count'])}"),
+            ("Validation chose", f"Degree {int(_summary['chosen_degree'])}"),
+            ("Validation MSE", f"{float(_summary['chosen_validation_mse']):.2f}"),
+            ("Training / validation", f"{int(_summary['train_count'])} / {int(_summary['validation_count'])}"),
         ],
     )
     _layout = mo.vstack(
         [
             section_md(
-                "8. Split Dependence in Validation",
-                "One drawback of the train-validation-test split is that validation MSE can be highly variable.",
+                "7. One Validation Split Can Be Fragile",
+                "A single validation split gives one useful estimate, but it can still be noisy.",
                 (
-                    "This section shows split instability with the same `N` and the same 50:50 rule. Two different train-validation splits can produce two different recommended degrees within the 0-through-10 grid, even when the model family and the data-generating process are unchanged.\n\n"
-                    "What changed here is only the partition of the same development sample."
+                    "This section now shows only **one** 50:50 train-validation split. The point is not to compare two colored splits side by side; it is to notice that the chosen degree can move when the development sample is small or unlucky.\n\n"
+                    "Press **Recreate data** several times. The model family and the rule for splitting do not change, but the validation curve can still wiggle enough to change the selected degree."
                 ),
             ),
             two_col(_sidebar, _chart),
-            note_md("If two reasonable validation splits disagree, that is evidence that one split is too fragile to carry the whole decision."),
-            takeaway_md("When one split feels noisy, the next step is usually to average more information rather than to over-trust one partition."),
+            note_md("One validation split is a valid model-selection tool, but it is still one noisy partition of finite data."),
+            takeaway_md("When one split feels fragile, average more validation information instead of over-trusting one partition."),
             questions_md(
                 [
-                    "What does the model with lowest MSE differs between splits?",
+                    "What changes when you recreate the data, and what stays fixed?",
+                    "Why might a small validation set pick a degree that feels too flexible or too simple?",
                 ]
             ),
         ],
@@ -1682,7 +1635,7 @@ def s8_cv_visual_intro(
     _layout = mo.vstack(
         [
             section_md(
-                "9. Cross-Validation: Averaging Validation Folds",
+                "8. Cross-Validation: Averaging Validation Folds",
                 "Each green cell is the validation fold for that round; the gold column is the held-out test set.",
                 (
                     "The numbers inside the green cells are hypothetical validation MSEs for two candidate models, A and B. We do **not** choose the model from one green cell. We average each candidate's validation MSE across the folds, then choose the model with the lower average validation MSE.\n\n"
@@ -1729,25 +1682,17 @@ def s8_section(
     selection_degrees,
     sidebar,
     split_a_color,
-    split_b_color,
     takeaway_md,
     two_col,
 ):
     _seed = 710 + int(s8_recreate.value or 0)
     _n = int(s8_n.value)
     _x_dev, _y_dev, _x_test, _y_test = build_selection_data(seed=_seed, development_n=_n)
-    _split_a, _summary_a = evaluate_validation_curves(
+    _split, _summary = evaluate_validation_curves(
         x_dev=_x_dev,
         y_dev=_y_dev,
         degree_grid=selection_degrees,
         split_seed=_seed + 9,
-        train_frac=0.50,
-    )
-    _split_b, _summary_b = evaluate_validation_curves(
-        x_dev=_x_dev,
-        y_dev=_y_dev,
-        degree_grid=selection_degrees,
-        split_seed=_seed + 41,
         train_frac=0.50,
     )
     _cv_frame = evaluate_cv_curves(_x_dev, _y_dev, selection_degrees, n_splits=5, seed=_seed + 73)
@@ -1757,8 +1702,7 @@ def s8_section(
 
     _comparison = pd.concat(
         [
-            _split_a[_split_a["Dataset"] == "Validation"][["Degree", "MSE"]].assign(Curve="Validation split A"),
-            _split_b[_split_b["Dataset"] == "Validation"][["Degree", "MSE"]].assign(Curve="Validation split B"),
+            _split[_split["Dataset"] == "Validation"][["Degree", "MSE"]].assign(Curve="One validation split"),
             _cv_frame.rename(columns={"CV MSE": "MSE"}).assign(Curve="5-fold CV"),
         ],
         ignore_index=True,
@@ -1767,8 +1711,8 @@ def s8_section(
     _plot_frame["Display MSE"] = np.maximum(_plot_frame["MSE"], 1e-3)
     _rules = pd.DataFrame(
         {
-            "Degree": [int(_summary_a["chosen_degree"]), int(_summary_b["chosen_degree"]), _cv_degree],
-            "Curve": ["Validation split A", "Validation split B", "5-fold CV"],
+            "Degree": [int(_summary["chosen_degree"]), _cv_degree],
+            "Curve": ["One validation split", "5-fold CV"],
         }
     )
     _chart = alt.Chart(_plot_frame).mark_line(point=True, strokeWidth=2.6).encode(
@@ -1777,8 +1721,8 @@ def s8_section(
         color=alt.Color(
             "Curve:N",
             scale=alt.Scale(
-                domain=["Validation split A", "Validation split B", "5-fold CV"],
-                range=[split_a_color, split_b_color, cv_color],
+                domain=["One validation split", "5-fold CV"],
+                range=[split_a_color, cv_color],
             ),
             legend=alt.Legend(title="Selection method"),
         ),
@@ -1789,8 +1733,8 @@ def s8_section(
         color=alt.Color(
             "Curve:N",
             scale=alt.Scale(
-                domain=["Validation split A", "Validation split B", "5-fold CV"],
-                range=[split_a_color, split_b_color, cv_color],
+                domain=["One validation split", "5-fold CV"],
+                range=[split_a_color, cv_color],
             ),
             legend=alt.Legend(title="Selection method"),
         ),
@@ -1799,8 +1743,7 @@ def s8_section(
     _sidebar = sidebar(
         widgets=[s8_n, s8_recreate],
         metrics=[
-            ("Split A chose", f"Degree {int(_summary_a['chosen_degree'])}"),
-            ("Split B chose", f"Degree {int(_summary_b['chosen_degree'])}"),
+            ("One split chose", f"Degree {int(_summary['chosen_degree'])}"),
             ("5-fold CV chose", f"Degree {_cv_degree}"),
             ("Held-out test MSE after CV", f"{_final_test_mse:.2f}"),
         ],
@@ -1808,8 +1751,8 @@ def s8_section(
     _layout = mo.vstack(
         [
             section_md(
-                "Cross-Validation for Stability",
-                "Now compare one-split validation choices with the 5-fold CV choice.",
+                "9. Cross-Validation for Stability",
+                "Now compare one validation split with the 5-fold CV choice.",
                 (
                     "Cross-validation is the remedy for instability in model comparison. Instead of letting one validation split carry the whole decision, we average validation MSE across folds and then choose the degree, from 0 through 10, with the lowest average error.\n\n"
                     "Cross-validation is not a replacement for the held-out test set. After choosing the degree, we retrain on all development data and use the held-out test set once for a final check."
