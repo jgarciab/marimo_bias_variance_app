@@ -1118,23 +1118,23 @@ def s5_section(
             {
                 "Role": "Training",
                 "Start": 0,
-                "End": _train_count,
-                "Count": _train_count,
-                "Label": f"Fit models\nn={_train_count}",
+                "End": 70,
+                "Percent": 70,
+                "Label": "Fit models\n70%",
             },
             {
                 "Role": "Validation",
-                "Start": _train_count,
-                "End": _train_count + _valid_count,
-                "Count": _valid_count,
-                "Label": f"Choose degree\nn={_valid_count}",
+                "Start": 70,
+                "End": 85,
+                "Percent": 15,
+                "Label": "Choose degree\n15%",
             },
             {
                 "Role": "Held-out test",
-                "Start": _train_count + _valid_count,
-                "End": _train_count + _valid_count + _test_count,
-                "Count": _test_count,
-                "Label": f"Final audit\nn={_test_count}",
+                "Start": 85,
+                "End": 100,
+                "Percent": 15,
+                "Label": "Final audit\n15%",
             },
         ]
     )
@@ -1151,7 +1151,7 @@ def s5_section(
         color=alt.Color("Role:N", scale=_split_scale, legend=alt.Legend(title="Role")),
         tooltip=[
             alt.Tooltip("Role:N"),
-            alt.Tooltip("Count:Q", format=".0f", title="Observations"),
+            alt.Tooltip("Percent:Q", format=".0f", title="Percent"),
         ],
     )
     _split_labels = alt.Chart(_split_frame).mark_text(
@@ -1230,8 +1230,8 @@ def s5_section(
                 "5. Train, Validate, Then Test Once",
                 "Use validation to choose model complexity, then reserve the held-out test set for one final audit.",
                 (
-                    "We often compare several candidate models before estimating the performance of the final chosen model. The split diagram keeps the jobs separate: training data fit each candidate, validation data choose among degrees 0 through 10, and the held-out test set waits until one degree has been selected.\n\n"
-                    "Here, `N` is the development sample size. It is split 50:50 into training and validation. The test sample is generated separately and stays out of sight until you flip the reveal switch.\n\n"
+                    "We often compare several candidate models before estimating the performance of the final chosen model. The split diagram is a schematic 70/15/15 workflow: training data fit each candidate, validation data choose among degrees 0 through 10, and the held-out test set waits until one degree has been selected.\n\n"
+                    "In the simulation below, `N` controls the development sample size used for the train/validation exercise. The held-out test sample stays out of sight until you flip the reveal switch.\n\n"
                     "Try first using the degree selected by validation, then deliberately choose a nearby or more flexible degree. The validation MSE can guide the choice, but the held-out test MSE is the final audit of the one model you actually chose."
                 ),
             ),
