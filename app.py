@@ -528,6 +528,9 @@ def intro(mo, style):
                 "# How to Choose the Right Predictive Model"
             ),
             mo.md(
+                "*Javier Garcia-Bernardo — ODISSEI Social Data Science team (SoDa) & Department of Methodology and Statistics, Utrecht University*"
+            ),
+            mo.md(
                 "*Model complexity, bias-variance, and cross-validation*"
             ),
             mo.md(
@@ -1771,6 +1774,18 @@ def s8_section(
         gap=0.30,
     )
     _layout
+    return
+
+
+@app.cell
+def footer(mo):
+    mo.md(
+        """
+        ---
+
+        _Javier Garcia-Bernardo — SoDa & Utrecht University._
+        """
+    )
     return
 
 
